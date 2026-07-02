@@ -115,6 +115,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <!-- post-processing addons (r128 globals) for the eclipse bloom; guarded, desktop only -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/GammaCorrectionShader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
@@ -137,6 +138,11 @@
   var canvas=document.getElementById('c');
   var renderer=new THREE.WebGLRenderer({canvas:canvas,antialias:true});
   renderer.setPixelRatio(Math.min(devicePixelRatio, lowPower?1.5:2));
+  renderer.toneMapping=THREE.ACESFilmicToneMapping;      // filmic response — the big realism jump
+  renderer.toneMappingExposure=1.1;
+  renderer.outputEncoding=THREE.sRGBEncoding;
+  renderer.shadowMap.enabled=!lowPower;
+  renderer.shadowMap.type=THREE.PCFSoftShadowMap;
 
   var scene=new THREE.Scene();
   var DAY=new THREE.Color(0x9ec6ee), NIGHT=new THREE.Color(0x0a1024);
@@ -147,7 +153,7 @@
   var camera=new THREE.PerspectiveCamera(BASE_FOV,1,1,12000); camera.layers.enable(2);
 
   // bloom composer (desktop only, guarded on addon availability)
-  var useBloom = !lowPower && THREE.EffectComposer && THREE.UnrealBloomPass && THREE.RenderPass;
+  var useBloom = !lowPower && THREE.EffectComposer && THREE.UnrealBloomPass && THREE.RenderPass && THREE.GammaCorrectionShader;
   var composer, bloomPass;
   if(useBloom){
     try{
@@ -155,13 +161,20 @@
       composer.addPass(new THREE.RenderPass(scene,camera));
       bloomPass=new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),0.35,0.6,0.82);
       composer.addPass(bloomPass);
+      composer.addPass(new THREE.ShaderPass(THREE.GammaCorrectionShader)); // linear RT -> sRGB out
     }catch(e){ useBloom=false; }
   }
 
   // ------------------------------------------------------------ lighting
-  var sun=new THREE.DirectionalLight(0xfff4e0,1.15); sun.position.set(-380,620,260); scene.add(sun);
-  var sky=new THREE.HemisphereLight(0xcfe4ff,0x6b7690,0.62); scene.add(sky);
-  var fill=new THREE.DirectionalLight(0x9fbfe6,0.28); fill.position.set(300,200,-400); scene.add(fill);
+  // key light tracks the VISIBLE sun (ahead + high) so you carve into backlight — grazing light is what makes snow read
+  var sun=new THREE.DirectionalLight(0xfff4e0,1.35); sun.position.set(100,260,-960); scene.add(sun);
+  sun.castShadow=!lowPower;
+  if(sun.castShadow){ sun.shadow.mapSize.set(2048,2048);
+    var sc=sun.shadow.camera; sc.near=60; sc.far=2400; sc.left=-160; sc.right=160; sc.top=160; sc.bottom=-160;
+    sun.shadow.bias=-0.0002; sun.shadow.normalBias=0.9; }
+  scene.add(sun.target);
+  var sky=new THREE.HemisphereLight(0xcfe4ff,0x8a93a8,0.85); scene.add(sky);  // strong sky/snow bounce fills the backlit faces
+  var fill=new THREE.DirectionalLight(0x9fbfe6,0.22); fill.position.set(300,200,400); scene.add(fill);
 
   // soft round dot texture so snow/spray/glints aren't hard squares
   var dotTex=(function(){ var cv=document.createElement('canvas'); cv.width=cv.height=64; var g=cv.getContext('2d');
@@ -189,25 +202,31 @@
     return base+mog+wall+kick;
   }
 
-  // ------------------------------------------------------------ terrain mesh
-  var TW=720, tgeo=new THREE.PlaneGeometry(TW,RUNLEN+400,120,300);
+  // ------------------------------------------------------------ terrain mesh (real PBR snow)
+  var texLoader=new THREE.TextureLoader(), maxAniso=renderer.capabilities.getMaxAnisotropy();
+  texLoader.crossOrigin='';
+  // assign each map only once it loads — a failed fetch degrades to clean untextured snow, never black
+  function snowTex(url,srgb,slot){ texLoader.load(url,function(t){
+    t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(90,860); t.anisotropy=Math.min(8,maxAniso);
+    if(srgb) t.encoding=THREE.sRGBEncoding; tmat[slot]=t; tmat.needsUpdate=true; }); }
+
+  var TW=720, tgeo=new THREE.PlaneGeometry(TW,RUNLEN+400,160,420);
   tgeo.rotateX(-Math.PI/2); tgeo.translate(0,0,-(RUNLEN/2-100));
   var tpos=tgeo.attributes.position, tcol=[], cc=new THREE.Color();
-  var sunDir=new THREE.Vector3(-380,620,260).normalize(), nrm=new THREE.Vector3();
   for(var i=0;i<tpos.count;i++){
     var x=tpos.getX(i),z=tpos.getZ(i),h=heightAt(x,z); tpos.setY(i,h);
     var e=2.0, hx=(heightAt(x+e,z)-heightAt(x-e,z))/(2*e), hz=(heightAt(x,z+e)-heightAt(x,z-e))/(2*e);
-    nrm.set(-hx,1,-hz).normalize();
-    var litv=0.45+0.55*Math.max(0,nrm.dot(sunDir));
     var dx=Math.abs(x-spineX(z)),zz=-z, slope=Math.min(1,Math.sqrt(hx*hx+hz*hz));
-    if(dx>250&&slope>0.72){ cc.setHSL(0.60,0.10,0.30+0.18*litv); }
-    else if(dx<PISTE){ var cord=0.03*Math.sin(x*0.9)+0.03*Math.sin(zz*0.8); cc.setHSL(0.58,0.10,Math.min(1,0.80*litv+0.14+cord)); }
-    else { cc.setHSL(0.60,0.13,0.70*litv+0.12); }
+    // flat tints only — the sun/shadows/normal-map carry the shading now
+    if(dx>250&&slope>0.72){ cc.setHSL(0.60,0.08,0.42); }                                   // exposed rock
+    else if(dx<PISTE){ var cord=0.02*Math.sin(x*0.9)+0.02*Math.sin(zz*0.8); cc.setHSL(0.58,0.03,0.93+cord); } // groomed corduroy
+    else { cc.setHSL(0.60,0.06,0.85); }                                                     // powder, faintly blue
     tcol.push(cc.r,cc.g,cc.b);
   }
   tgeo.setAttribute('color',new THREE.Float32BufferAttribute(tcol,3)); tgeo.computeVertexNormals();
-  var tmat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.92,metalness:0.0});
-  scene.add(new THREE.Mesh(tgeo,tmat));
+  var tmat=new THREE.MeshStandardMaterial({vertexColors:true,normalScale:new THREE.Vector2(1.4,1.4),roughness:0.85,metalness:0.0});
+  snowTex('assets/snow_color.jpg',true,'map'); snowTex('assets/snow_normal.jpg',false,'normalMap'); snowTex('assets/snow_rough.jpg',false,'roughnessMap');
+  var terrainMesh=new THREE.Mesh(tgeo,tmat); terrainMesh.receiveShadow=!lowPower; scene.add(terrainMesh);
 
   // sparkle glints on the snow
   var glintN=1400, gp=new Float32Array(glintN*3);
@@ -231,6 +250,20 @@
   var starMat=new THREE.PointsMaterial({color:0xffffff,size:9,sizeAttenuation:true,transparent:true,opacity:0,depthWrite:false});
   var stars=new THREE.Points(new THREE.BufferGeometry().setAttribute('position',new THREE.BufferAttribute(sp,3)),starMat); stars.layers.set(2); scene.add(stars);
 
+  // distant mountain ridgelines — cheap silhouettes that give the valley a horizon
+  function ridgeTexture(seed,jag){ var cv=document.createElement('canvas'); cv.width=1024; cv.height=256; var g=cv.getContext('2d');
+    g.fillStyle='#ffffff'; g.beginPath(); g.moveTo(0,256);
+    for(var px=0;px<=1024;px+=4){ var t=px/1024;
+      var yy=120 - 70*fbm(t*9+seed,seed*3) - jag*26*fbm(t*33+seed*7,seed) ; g.lineTo(px,yy); }
+    g.lineTo(1024,256); g.closePath(); g.fill();
+    var t2=new THREE.CanvasTexture(cv); t2.wrapS=THREE.RepeatWrapping; t2.repeat.x=5; return t2; }
+  var ridgeG=new THREE.Group(); scene.add(ridgeG);
+  function mkRidge(radius,h,yoff,seed,jag){ var geo=new THREE.CylinderGeometry(radius,radius,h,72,1,true);
+    var mat=new THREE.MeshBasicMaterial({map:ridgeTexture(seed,jag),transparent:true,side:THREE.BackSide,depthWrite:false,fog:false});
+    var m=new THREE.Mesh(geo,mat); m.position.y=yoff; m.layers.set(2); ridgeG.add(m); return mat; }
+  // bases buried far below the horizon so only the jagged tops break the skyline
+  var ridgeFar=mkRidge(8300,2600,-500,7,0.6), ridgeNear=mkRidge(6600,2300,-750,13,1.0);
+
   function radial(inner,mid,outer){ var cv=document.createElement('canvas'); cv.width=cv.height=128; var g=cv.getContext('2d');
     var rg=g.createRadialGradient(64,64,0,64,64,64); rg.addColorStop(0,inner); rg.addColorStop(0.4,mid); rg.addColorStop(1,outer);
     g.fillStyle=rg; g.fillRect(0,0,128,128); return new THREE.CanvasTexture(cv); }
@@ -238,13 +271,42 @@
     g.fillStyle='#f2f2ea'; g.fillRect(0,0,140,170); g.fillStyle='#c81f1f'; g.fillRect(0,0,140,26); g.fillRect(0,144,140,26);
     g.fillStyle='#0e0f12'; g.font='bold 118px Arial,sans-serif'; g.textAlign='center'; g.textBaseline='middle'; g.fillText(num,70,90);
     g.strokeStyle='#0e0f12'; g.lineWidth=5; g.strokeRect(3,3,134,164); var t=new THREE.CanvasTexture(cv); t.anisotropy=4; return t; }
-  var SUNDIR=new THREE.Vector3(0.10,0.17,-0.98).normalize(), SUNDIST=7200;
-  var coronaSpr=new THREE.Sprite(new THREE.SpriteMaterial({map:radial('rgba(255,250,235,0.95)','rgba(255,240,210,0.35)','rgba(255,240,210,0)'),blending:THREE.AdditiveBlending,depthWrite:false,depthTest:false,transparent:true,opacity:0}));
+  var SUNDIR=new THREE.Vector3(0.10,0.26,-0.96).normalize(), SUNDIST=7200;
+  // crisp eclipsed sun: one canvas, redrawn as the moon takes its bite (a punched hole shows the sky through it)
+  var eclCv=document.createElement('canvas'); eclCv.width=eclCv.height=512;
+  var eclTex=new THREE.CanvasTexture(eclCv); eclTex.encoding=THREE.sRGBEncoding; var lastCover=-1;
+  function drawEclipsedSun(cover){
+    var g=eclCv.getContext('2d'); g.clearRect(0,0,512,512);
+    var cx=256, R=95;
+    var glow=g.createRadialGradient(cx,cx,R*0.5,cx,cx,252);          // atmospheric glare
+    glow.addColorStop(0,'rgba(255,244,214,0.45)'); glow.addColorStop(0.4,'rgba(255,236,190,0.13)'); glow.addColorStop(1,'rgba(255,236,190,0)');
+    g.fillStyle=glow; g.fillRect(0,0,512,512);
+    var sg=g.createRadialGradient(cx,cx,0,cx,cx,R);                  // photosphere with limb darkening
+    sg.addColorStop(0,'#fffefa'); sg.addColorStop(0.8,'#fff3d2'); sg.addColorStop(1,'#ffdf9e');
+    g.fillStyle=sg; g.beginPath(); g.arc(cx,cx,R,0,6.2832); g.fill();
+    var d=(1-cover)*2.1*R, mx=cx+d*0.97, my=cx-d*0.26;               // moon slides in from upper-right
+    g.globalCompositeOperation='destination-out';
+    g.beginPath(); g.arc(mx,my,R*1.02,0,6.2832); g.fill();           // the bite: transparent, sky shows through
+    g.globalCompositeOperation='source-over';
+    eclTex.needsUpdate=true;
+  }
+  drawEclipsedSun(0.12);
+  var sunSpr=new THREE.Sprite(new THREE.SpriteMaterial({map:eclTex,depthWrite:false,depthTest:false,transparent:true}));
+  sunSpr.scale.set(1450,1450,1); sunSpr.layers.set(2); sunSpr.renderOrder=2; scene.add(sunSpr);
+  // corona with radial streamers, revealed at totality
+  var corTex=(function(){ var cv=document.createElement('canvas'); cv.width=cv.height=512; var g=cv.getContext('2d');
+    var base=g.createRadialGradient(256,256,40,256,256,250);
+    base.addColorStop(0,'rgba(255,252,240,0.9)'); base.addColorStop(0.25,'rgba(240,244,255,0.35)'); base.addColorStop(1,'rgba(240,244,255,0)');
+    g.fillStyle=base; g.fillRect(0,0,512,512);
+    for(var i=0;i<110;i++){ var a=Math.random()*6.2832;
+      var len=90+Math.random()*150*(0.5+Math.abs(Math.cos(a)));      // streamers bias equatorial, like a real corona
+      g.save(); g.translate(256,256); g.rotate(a);
+      var lg=g.createLinearGradient(40,0,40+len,0);
+      lg.addColorStop(0,'rgba(255,255,250,'+(0.10+Math.random()*0.12)+')'); lg.addColorStop(1,'rgba(255,255,250,0)');
+      g.fillStyle=lg; g.beginPath(); g.moveTo(40,-2.2); g.lineTo(40+len,0); g.lineTo(40,2.2); g.fill(); g.restore(); }
+    var t=new THREE.CanvasTexture(cv); t.encoding=THREE.sRGBEncoding; return t; })();
+  var coronaSpr=new THREE.Sprite(new THREE.SpriteMaterial({map:corTex,blending:THREE.AdditiveBlending,depthWrite:false,depthTest:false,transparent:true,opacity:0}));
   coronaSpr.scale.set(2600,2600,1); coronaSpr.layers.set(2); coronaSpr.renderOrder=1; scene.add(coronaSpr);
-  var sunSpr=new THREE.Sprite(new THREE.SpriteMaterial({map:radial('rgba(255,255,250,1)','rgba(255,245,220,0.9)','rgba(255,240,210,0)'),blending:THREE.AdditiveBlending,depthWrite:false,depthTest:false,transparent:true}));
-  sunSpr.scale.set(560,560,1); sunSpr.layers.set(2); sunSpr.renderOrder=2; scene.add(sunSpr);
-  var moonSpr=new THREE.Sprite(new THREE.SpriteMaterial({map:radial('rgba(6,7,14,1)','rgba(6,7,14,1)','rgba(6,7,14,0)'),depthWrite:false,depthTest:false,transparent:true}));
-  moonSpr.scale.set(548,548,1); moonSpr.layers.set(2); moonSpr.renderOrder=3; scene.add(moonSpr);
 
   // ------------------------------------------------------------ drifting snowfall (atmosphere)
   var SF=lowPower?350:700, sfp=new Float32Array(SF*3);
@@ -262,10 +324,14 @@
   var folMesh=new THREE.InstancedMesh(pineFoliage,new THREE.MeshStandardMaterial({color:0x2b4a3a,roughness:0.95,flatShading:true}),TREES.length);
   var trkMesh=new THREE.InstancedMesh(pineTrunk,new THREE.MeshStandardMaterial({color:0x3a2b22,roughness:1}),TREES.length);
   var capMesh=new THREE.InstancedMesh(snowCapGeo,new THREE.MeshStandardMaterial({color:0xeef6ff,roughness:0.8}),TREES.length);
-  (function(){ var m=new THREE.Matrix4(),q=new THREE.Quaternion(),sc=new THREE.Vector3(),pv=new THREE.Vector3();
+  (function(){ var m=new THREE.Matrix4(),q=new THREE.Quaternion(),sc=new THREE.Vector3(),pv=new THREE.Vector3(),tc=new THREE.Color();
+    folMesh.material.color.set(0xffffff);                     // per-instance greens carry the colour
     for(var i=0;i<TREES.length;i++){ var t=TREES[i]; sc.setScalar(t.s); q.setFromAxisAngle(new THREE.Vector3(0,1,0),Math.random()*6.28);
-      m.compose(pv.set(t.x,t.y,t.z),q,sc); folMesh.setMatrixAt(i,m); trkMesh.setMatrixAt(i,m); capMesh.setMatrixAt(i,m); }
-    folMesh.instanceMatrix.needsUpdate=trkMesh.instanceMatrix.needsUpdate=capMesh.instanceMatrix.needsUpdate=true; })();
+      m.compose(pv.set(t.x,t.y,t.z),q,sc); folMesh.setMatrixAt(i,m); trkMesh.setMatrixAt(i,m); capMesh.setMatrixAt(i,m);
+      tc.setHSL(0.34+(Math.random()-0.5)*0.05,0.32+Math.random()*0.18,0.16+Math.random()*0.12); folMesh.setColorAt(i,tc); }
+    folMesh.instanceMatrix.needsUpdate=trkMesh.instanceMatrix.needsUpdate=capMesh.instanceMatrix.needsUpdate=true;
+    if(folMesh.instanceColor) folMesh.instanceColor.needsUpdate=true; })();
+  folMesh.castShadow=trkMesh.castShadow=capMesh.castShadow=!lowPower;
   scene.add(folMesh,trkMesh,capMesh);
 
   // ============================================================ slalom gates
@@ -308,10 +374,10 @@
   // ============================================================ the skier — a pro downhill racer
   var RIG={}, skier=new THREE.Group();
   (function buildSkier(){
-    var red=new THREE.MeshStandardMaterial({color:0xd51f26,roughness:0.5,metalness:0.05});
-    var blk=new THREE.MeshStandardMaterial({color:0x14161c,roughness:0.55});
-    var white=new THREE.MeshStandardMaterial({color:0xeef0f4,roughness:0.5});
-    var helm=new THREE.MeshStandardMaterial({color:0x0e1116,roughness:0.2,metalness:0.4});
+    var red=new THREE.MeshStandardMaterial({color:0xd51f26,roughness:0.42,metalness:0.02});   // lycra sheen
+    var blk=new THREE.MeshStandardMaterial({color:0x14161c,roughness:0.6});
+    var white=new THREE.MeshStandardMaterial({color:0xeef0f4,roughness:0.55});
+    var helm=new THREE.MeshStandardMaterial({color:0x0e1116,roughness:0.12,metalness:0.5});   // gloss carbon shell
     var visorM=new THREE.MeshStandardMaterial({color:0x9a7a2e,roughness:0.06,metalness:0.95,emissive:0x241a06,emissiveIntensity:0.5});
     var boot=new THREE.MeshStandardMaterial({color:0x262a33,roughness:0.42,metalness:0.15});
     var buckle=new THREE.MeshStandardMaterial({color:0x39d0ff,roughness:0.3,metalness:0.4,emissive:0x0a2a33,emissiveIntensity:0.4});
@@ -369,6 +435,7 @@
     P(neck,BOX(0.78,0.22,0.12),visorM,0,0.62,-0.94);             // tinted lens
   })();
   skier.scale.setScalar(0.9);
+  skier.traverse(function(o){ if(o.isMesh) o.castShadow=!lowPower; });
   scene.add(skier);
   var blob=new THREE.Mesh(new THREE.CircleGeometry(2.2,20),new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:0.28,depthWrite:false})); blob.rotation.x=-Math.PI/2; scene.add(blob);
 
@@ -497,18 +564,22 @@
   var now=0;
   function applyEclipse(phase){ phase=clamp(phase,0,1);
     var dim=1-0.94*Math.pow(phase,1.3);
-    sun.intensity=1.15*dim; fill.intensity=0.28*dim+0.02; sky.intensity=0.62*dim+0.05; sun.color.setHSL(0.09,0.65*phase,1.0);
+    sun.intensity=1.35*dim; fill.intensity=0.22*dim+0.02; sky.intensity=0.72*dim+0.06; sun.color.setHSL(0.09,0.65*phase,1.0);
+    renderer.toneMappingExposure=1.0-0.24*phase;                      // the world's film stock closes down
     var c=DAY.clone().lerp(NIGHT,Math.min(1,phase*1.12)); scene.background.copy(c); scene.fog.color.copy(c);
     scene.fog.near=700-400*phase; scene.fog.far=6200-2600*phase; skyMat.uniforms.uPhase.value=phase;
     starMat.opacity=smoothstep(phase,0.55,0.95)*0.95; glintMat.opacity=smoothstep(phase,0.3,0.7)*0.5*(1-phase*0.5);
-    sfMat.opacity=0.25+0.4*phase;
-    var cover=clamp((phase-0.05)/0.9,0,1), offset=(1-cover)*620;
+    sfMat.opacity=0.25+0.15*phase;
+    ridgeFar.color.copy(c).lerp(new THREE.Color(0xffffff),0.10);      // barely lighter than the haze they sit in
+    ridgeNear.color.copy(c).lerp(new THREE.Color(0xffffff),0.04);
+    // the moon's bite grows across the whole run; full cover just before the finish
+    var cover=clamp(0.12+0.88*(phase/0.94),0,1); if(phase>=0.94) cover=1;
+    if(Math.abs(cover-lastCover)>0.004){ lastCover=cover; drawEclipsedSun(cover); }
     var sunPos=SUNDIR.clone().multiplyScalar(SUNDIST).add(camera.position);
     sunSpr.position.copy(sunPos); coronaSpr.position.copy(sunPos);
-    moonSpr.position.copy(sunPos).add(new THREE.Vector3(1,0.25,0).normalize().multiplyScalar(offset));
-    var tot=smoothstep(phase,0.82,0.99);
-    coronaSpr.material.opacity=0.15+0.85*tot; coronaSpr.scale.setScalar(1600+1400*tot+120*Math.sin(now*2));
-    sunSpr.material.opacity=1-0.85*tot; tmat.color.setHSL(0.6,0.05+0.18*phase,1.0-0.25*phase);
+    var tot=smoothstep(phase,0.84,0.95);
+    coronaSpr.material.opacity=tot; coronaSpr.scale.setScalar(2000+1200*tot+120*Math.sin(now*2));
+    sunSpr.material.opacity=1-0.75*tot; tmat.color.setHSL(0.6,0.03+0.15*phase,1.0-0.18*phase);
     if(useBloom) bloomPass.strength = 0.22 + 1.25*phase;
   }
 
@@ -632,7 +703,10 @@
       lookAt.set(S.x+dirX*12,S.y-0.2,S.z+dirZ*22); camera.lookAt(lookAt);
       var fovT=BASE_FOV+16*tuck*speedK+6*speedK; camera.fov+=(fovT-camera.fov)*(1-Math.pow(0.02,dt)); camera.updateProjectionMatrix();
     }
-    skyDome.position.copy(camera.position); stars.position.copy(camera.position);
+    skyDome.position.copy(camera.position); stars.position.copy(camera.position); ridgeG.position.copy(camera.position);
+    coronaSpr.material.rotation+=dt*0.02;                              // corona slowly breathes around the black disc
+    if(sun.castShadow){ sun.position.copy(skier.position).addScaledVector(SUNDIR,900); // shadow frustum tracks the racer
+      sun.target.position.copy(skier.position); sun.target.updateMatrixWorld(); }
 
     // audio
     if(AUD.ready){

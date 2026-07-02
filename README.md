@@ -45,7 +45,7 @@ and bloom in lockstep: brilliant daylight at the summit → partial → diamond 
 - **Procedural sound engine** (WebAudio, zero asset files): continuous ski-carve swish
   (volume/pitch track speed & edge angle), wind, jump/land thuds, impact hits, gate dings,
   a low totality drone that swells toward darkness, and success / fail / bullseye chimes.
-- **Hyperrealism pass:** soft round snowflakes + drifting snowfall, volumetric powder
+- **Realism pass:** ACES filmic tone mapping, real-time sun shadows, real CC0 PBR snow textures (color/normal/roughness from ambientCG), a crisp canvas-drawn eclipse (visible moon bite all run + streamer corona at totality), distant ridge silhouettes with aerial haze, soft round snowflakes + drifting snowfall, volumetric powder
   spray off the edges, persistent carve tracks, a phase-driven bloom on the corona and
   glints (desktop; auto-off on low-power devices), FOV widening and a subtle camera bob at
   speed.

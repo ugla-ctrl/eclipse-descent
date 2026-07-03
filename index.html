@@ -99,8 +99,8 @@
     <div id="s-title" style="font-family:'Cormorant Garamond',serif;font-weight:300;font-size:62px;color:#f2f6ff;letter-spacing:.01em">Eclipse Descent</div>
     <div id="s-sub" style="margin-top:12px;color:#b8c8e0;font-size:14px;max-width:44ch;line-height:1.5">choose your line down the mountain — either way, the moon is swallowing the sun</div>
     <div id="mode-row" style="margin-top:30px;display:flex;gap:22px;justify-content:center">
-      <button class="modecard" id="m-sim"><div class="mc-ico">❄</div><div class="mc-name">Free Ride</div><div class="mc-desc">pure descent — race the shadow to totality at your own pace</div></button>
-      <button class="modecard" id="m-adv"><div class="mc-ico">🎯</div><div class="mc-name">Adventure</div><div class="mc-desc">dodge trees &amp; snowballs, then stick the target landing</div></button>
+      <button class="modecard" id="m-sim"><div class="mc-ico">❄</div><div class="mc-name">Free Ride</div><div class="mc-desc">roam the open mountain — totality sweeps over in real time, again and again</div></button>
+      <button class="modecard" id="m-adv"><div class="mc-ico">🎯</div><div class="mc-name">Adventure</div><div class="mc-desc">dodge rocks &amp; snowballs, then stick the target landing</div></button>
     </div>
     <div id="diff-row">
       <span class="difflab">difficulty</span>
@@ -159,7 +159,7 @@
     try{
       composer=new THREE.EffectComposer(renderer);
       composer.addPass(new THREE.RenderPass(scene,camera));
-      bloomPass=new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),0.35,0.6,0.82);
+      bloomPass=new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),0.35,0.6,0.93);
       composer.addPass(bloomPass);
       composer.addPass(new THREE.ShaderPass(THREE.GammaCorrectionShader)); // linear RT -> sRGB out
     }catch(e){ useBloom=false; }
@@ -213,14 +213,19 @@
   var TW=720, tgeo=new THREE.PlaneGeometry(TW,RUNLEN+400,160,420);
   tgeo.rotateX(-Math.PI/2); tgeo.translate(0,0,-(RUNLEN/2-100));
   var tpos=tgeo.attributes.position, tcol=[], cc=new THREE.Color();
+  var tusCol=new THREE.Color(0x8f7340), rockCol=new THREE.Color(0x6b6862);
   for(var i=0;i<tpos.count;i++){
     var x=tpos.getX(i),z=tpos.getZ(i),h=heightAt(x,z); tpos.setY(i,h);
     var e=2.0, hx=(heightAt(x+e,z)-heightAt(x-e,z))/(2*e), hz=(heightAt(x,z+e)-heightAt(x,z-e))/(2*e);
     var dx=Math.abs(x-spineX(z)),zz=-z, slope=Math.min(1,Math.sqrt(hx*hx+hz*hz));
     // flat tints only — the sun/shadows/normal-map carry the shading now
-    if(dx>250&&slope>0.72){ cc.setHSL(0.60,0.08,0.42); }                                   // exposed rock
-    else if(dx<PISTE){ var cord=0.02*Math.sin(x*0.9)+0.02*Math.sin(zz*0.8); cc.setHSL(0.58,0.03,0.93+cord); } // groomed corduroy
-    else { cc.setHSL(0.60,0.06,0.85); }                                                     // powder, faintly blue
+    if(dx>250&&slope>0.72){ cc.setHSL(0.60,0.08,0.42).lerp(rockCol,0.5); }                 // exposed rock faces
+    else if(dx<PISTE){ var cord=0.02*Math.sin(x*0.9)+0.02*Math.sin(zz*0.8); cc.setHSL(0.58,0.03,0.90+cord); } // groomed corduroy
+    else { cc.setHSL(0.60,0.06,0.85);                                                      // powder, faintly blue
+      // NZ high country: tussock and scree bleed through where the cover thins (more toward the valley)
+      var tus=fbm(x*0.02+7,zz*0.02+3), thr=0.72-0.14*(zz/RUNLEN);
+      if(tus>thr) cc.lerp(tusCol,Math.min(0.75,(tus-thr)*3.0));
+    }
     tcol.push(cc.r,cc.g,cc.b);
   }
   tgeo.setAttribute('color',new THREE.Float32BufferAttribute(tcol,3)); tgeo.computeVertexNormals();
@@ -314,25 +319,38 @@
   var sfMat=new THREE.PointsMaterial({color:0xffffff,map:dotTex,size:2.2,sizeAttenuation:true,transparent:true,opacity:0.55,depthWrite:false});
   var snowfall=new THREE.Points(new THREE.BufferGeometry().setAttribute('position',new THREE.BufferAttribute(sfp,3)),sfMat); snowfall.frustumCulled=false; scene.add(snowfall);
 
-  // ============================================================ trees (instanced pines)
-  var pineFoliage=new THREE.ConeGeometry(3.4,11,7); pineFoliage.translate(0,7,0);
-  var pineTrunk=new THREE.CylinderGeometry(0.5,0.7,3,5); pineTrunk.translate(0,1.5,0);
-  var snowCapGeo=new THREE.ConeGeometry(2.2,3.4,7); snowCapGeo.translate(0,13,0);
-  var TREES=[];
-  for(var i=0;i<900;i++){ var zz=180+Math.random()*(RUNLEN-260), z=-zz, side=Math.random()<0.5?-1:1, off=PISTE+14+Math.random()*250, x=spineX(z)+side*off;
-    if(Math.abs(x-spineX(z))<PISTE+8) continue; if(Math.abs(x)>TW*0.46) continue; TREES.push({x:x,y:heightAt(x,z),z:z,s:0.7+Math.random()*0.8}); }
-  var folMesh=new THREE.InstancedMesh(pineFoliage,new THREE.MeshStandardMaterial({color:0x2b4a3a,roughness:0.95,flatShading:true}),TREES.length);
-  var trkMesh=new THREE.InstancedMesh(pineTrunk,new THREE.MeshStandardMaterial({color:0x3a2b22,roughness:1}),TREES.length);
-  var capMesh=new THREE.InstancedMesh(snowCapGeo,new THREE.MeshStandardMaterial({color:0xeef6ff,roughness:0.8}),TREES.length);
-  (function(){ var m=new THREE.Matrix4(),q=new THREE.Quaternion(),sc=new THREE.Vector3(),pv=new THREE.Vector3(),tc=new THREE.Color();
-    folMesh.material.color.set(0xffffff);                     // per-instance greens carry the colour
-    for(var i=0;i<TREES.length;i++){ var t=TREES[i]; sc.setScalar(t.s); q.setFromAxisAngle(new THREE.Vector3(0,1,0),Math.random()*6.28);
-      m.compose(pv.set(t.x,t.y,t.z),q,sc); folMesh.setMatrixAt(i,m); trkMesh.setMatrixAt(i,m); capMesh.setMatrixAt(i,m);
-      tc.setHSL(0.34+(Math.random()-0.5)*0.05,0.32+Math.random()*0.18,0.16+Math.random()*0.12); folMesh.setColorAt(i,tc); }
-    folMesh.instanceMatrix.needsUpdate=trkMesh.instanceMatrix.needsUpdate=capMesh.instanceMatrix.needsUpdate=true;
-    if(folMesh.instanceColor) folMesh.instanceColor.needsUpdate=true; })();
-  folMesh.castShadow=trkMesh.castShadow=capMesh.castShadow=!lowPower;
-  scene.add(folMesh,trkMesh,capMesh);
+  // ============================================================ rock & tussock (Cardrona-style treeless alpine)
+  var ROCKS=[];
+  var rockGeo=new THREE.IcosahedronGeometry(1.6,1);
+  var rockMesh=new THREE.InstancedMesh(rockGeo,new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.95,flatShading:true}),520);
+  (function(){ var m=new THREE.Matrix4(),q=new THREE.Quaternion(),sc=new THREE.Vector3(),pv=new THREE.Vector3(),tc=new THREE.Color(),eu=new THREE.Euler();
+    var placed=0,guard=0;
+    while(placed<520&&guard++<6000){ var zz=170+Math.random()*(RUNLEN-240), z=-zz, side=Math.random()<0.5?-1:1;
+      var off=PISTE+12+Math.pow(Math.random(),0.7)*130, x=spineX(z)+side*off;   // stay on the apron, off the steep walls
+      if(Math.abs(x)>TW*0.47) continue;
+      var s=0.6+Math.random()*2.2;
+      q.setFromEuler(eu.set(Math.random()*0.6,Math.random()*6.28,Math.random()*0.6));
+      sc.set(s*(0.8+Math.random()*0.7),s*(0.55+Math.random()*0.5),s*(0.8+Math.random()*0.7));
+      m.compose(pv.set(x,heightAt(x,z)+s*0.1,z),q,sc); rockMesh.setMatrixAt(placed,m);
+      tc.setHSL(0.08+Math.random()*0.04,0.08+Math.random()*0.10,0.26+Math.random()*0.16); rockMesh.setColorAt(placed,tc);
+      ROCKS.push({x:x,z:z,r:1.6*s}); placed++; }
+    rockMesh.instanceMatrix.needsUpdate=true; if(rockMesh.instanceColor) rockMesh.instanceColor.needsUpdate=true; })();
+  rockMesh.castShadow=!lowPower; scene.add(rockMesh);
+  // golden tussock breaking through the snow, thicker toward the valley
+  var tusGeo=new THREE.ConeGeometry(1.7,1.0,7); tusGeo.translate(0,0.4,0);   // low flat clumps, not tents
+  var tusMesh=new THREE.InstancedMesh(tusGeo,new THREE.MeshStandardMaterial({color:0xffffff,roughness:1,flatShading:true}),900);
+  (function(){ var m=new THREE.Matrix4(),q=new THREE.Quaternion(),sc=new THREE.Vector3(),pv=new THREE.Vector3(),tc=new THREE.Color(),up=new THREE.Vector3(0,1,0);
+    var placed=0,guard=0;
+    while(placed<900&&guard++<9000){ var zz=RUNLEN*0.2+Math.random()*(RUNLEN*0.8-160), z=-zz, side=Math.random()<0.5?-1:1;
+      var off=PISTE+8+Math.random()*135, x=spineX(z)+side*off;                  // apron only, same as the rocks
+      if(Math.abs(x)>TW*0.47) continue;
+      var s=0.6+Math.random()*1.7;
+      sc.set(s,s*(0.35+Math.random()*0.4),s); q.setFromAxisAngle(up,Math.random()*6.28);
+      m.compose(pv.set(x,heightAt(x,z),z),q,sc); tusMesh.setMatrixAt(placed,m);
+      tc.setHSL(0.10+Math.random()*0.03,0.42+Math.random()*0.18,0.28+Math.random()*0.14); tusMesh.setColorAt(placed,tc);
+      placed++; }
+    tusMesh.instanceMatrix.needsUpdate=true; if(tusMesh.instanceColor) tusMesh.instanceColor.needsUpdate=true; })();
+  scene.add(tusMesh);
 
   // ============================================================ slalom gates
   var GATES=[], gateGroup=new THREE.Group(); scene.add(gateGroup);
@@ -507,13 +525,21 @@
   var S={ x:0,z:0,y:0,vy:0, head:0,headTarget:0, speed:8, airborne:false, roll:0, crash:0, invuln:0,
           gates:0, dodged:0, hearts:Infinity, airStart:0,airAccum:0,bestAir:0, prevZZ:0,
           mode:'sim', started:false, finished:false, failed:false, landRating:'', manualEcl:0, shake:0, toastT:0, tuckA:0 };
-  var topSpeed=0, curPhase=0;
+  var topSpeed=0, curPhase=0, eclT=0;
+  // Free Ride runs the eclipse on its own clock, like the Iceland flight sim: darkness sweeps over
+  // in real time whether you bomb the fall line or just roam. ~90s to totality, hold, release, repeat.
+  var ECL={up:90,hold:16,down:28,day:26}; ECL.T=ECL.up+ECL.hold+ECL.down+ECL.day;
+  function eclipseCycle(t){ var u=t%ECL.T;
+    if(u<ECL.up) return smoothstep(u/ECL.up,0,1);
+    u-=ECL.up; if(u<ECL.hold) return 1;
+    u-=ECL.hold; if(u<ECL.down) return 1-smoothstep(u/ECL.down,0,1);
+    return 0; }
 
   function reset(){
     S.x=spineX(0); S.z=-6; S.y=heightAt(S.x,S.z)+SKI_OFF; S.vy=0; S.prevZZ=6;
     S.head=0; S.headTarget=0; S.speed=8; S.airborne=false; S.roll=0; S.crash=0; S.invuln=0;
     S.gates=0; S.dodged=0; S.airAccum=0; S.bestAir=0; S.finished=false; S.failed=false; S.manualEcl=0; S.shake=0; S.landRating=''; S.toastT=0;
-    S.hearts=diff.hearts; topSpeed=0; lastBallZ=0;
+    S.hearts=diff.hearts; topSpeed=0; lastBallZ=0; eclT=0;
     for(var i=0;i<GATES.length;i++) GATES[i].passed=false;
     resetBalls(); clearTracks();
     document.getElementById('finish').style.display='none';
@@ -580,7 +606,7 @@
     var tot=smoothstep(phase,0.84,0.95);
     coronaSpr.material.opacity=tot; coronaSpr.scale.setScalar(2000+1200*tot+120*Math.sin(now*2));
     sunSpr.material.opacity=1-0.75*tot; tmat.color.setHSL(0.6,0.03+0.15*phase,1.0-0.18*phase);
-    if(useBloom) bloomPass.strength = 0.22 + 1.25*phase;
+    if(useBloom) bloomPass.strength = 0.14 + 1.1*phase;
   }
 
   // ============================================================ collisions
@@ -645,8 +671,9 @@
     }
     S.prevZZ=curZZ;
 
-    // trees
-    if(moving&&S.crash<=0&&S.invuln<=0){ for(var i=0;i<TREES.length;i++){ var t=TREES[i]; if(Math.abs(t.z-S.z)<3){ var ddx=t.x-S.x; if(ddx*ddx<9){ hitObstacle(); break; } } } }
+    // rocks
+    if(moving&&S.crash<=0&&S.invuln<=0){ for(var i=0;i<ROCKS.length;i++){ var t=ROCKS[i]; var dz=t.z-S.z;
+      if(dz>-4&&dz<4){ var ddx=t.x-S.x, rr=t.r+1.4; if(ddx*ddx+dz*dz<rr*rr){ hitObstacle(); break; } } } }
 
     // snowballs (adventure)
     if(S.mode==='adv'&&moving){
@@ -684,10 +711,15 @@
     blob.position.set(S.x,heightAt(S.x,S.z)+0.15,S.z);
     var bs=S.airborne?clamp(1-(S.y-groundY)/40,0.3,1):1; blob.scale.setScalar(bs); blob.material.opacity=0.28*bs;
 
-    // eclipse phase from descent
-    if(keys.KeyE) S.manualEcl=Math.min(1,S.manualEcl+dt*0.15);
+    // eclipse driver — Free Ride: real-time cycle (E fast-forwards); Adventure: totality lands at the finish
     var descProg=clamp(-S.z/RUNLEN,0,1);
-    curPhase=clamp(Math.pow(descProg,1.15)*0.98+S.manualEcl,0,1);
+    if(S.mode==='sim'){
+      if(S.started) eclT+=dt*(keys.KeyE?8:1);
+      curPhase=eclipseCycle(eclT);
+    } else {
+      if(keys.KeyE) S.manualEcl=Math.min(1,S.manualEcl+dt*0.15);
+      curPhase=clamp(Math.pow(descProg,1.15)*0.98+S.manualEcl,0,1);
+    }
     applyEclipse(curPhase);
 
     // snowfall follows camera, drifts down
@@ -717,23 +749,29 @@
       var shimT=smoothstep(curPhase,0.85,1.0)*0.035; AUD.shimG.gain.value+=(shimT-AUD.shimG.gain.value)*Math.min(1,dt*2);
     }
 
-    // finish
-    if(!S.finished&&!S.failed&&-S.z>=RUNLEN-95){ S.finished=true;
-      if(S.mode==='adv'){ document.getElementById('finish-title').innerHTML='You made it<br>to totality';
+    // base of the run
+    if(!S.finished&&!S.failed&&-S.z>=RUNLEN-95){
+      if(S.mode==='sim'){
+        // endless roam: wrap back to the summit; the eclipse keeps its own clock
+        var oldY=S.y; S.z+=RUNLEN-89; S.prevZZ=-S.z;
+        S.y=heightAt(S.x,S.z)+SKI_OFF;
+        camera.position.z+=RUNLEN-89; camera.position.y+=S.y-oldY;   // carry the chase cam so there's no swoop
+        for(var i=0;i<GATES.length;i++) GATES[i].passed=false;
+        clearTracks(); toast('ANOTHER LAP',1.2);
+      } else { S.finished=true;
+        document.getElementById('finish-title').innerHTML='You made it<br>to totality';
         var rate=S.landRating||'FINISHED';
         document.getElementById('finish-stats').innerHTML='landing <b>'+rate+'</b> &nbsp;·&nbsp; ♥ <b>'+Math.max(0,S.hearts)+'/'+diff.hearts+'</b> &nbsp;·&nbsp; dodged <b>'+S.dodged+'</b> &nbsp;·&nbsp; top <b>'+Math.round(topSpeed*3.6)+' km/h</b>';
-        sfxLevelWin(); }
-      else { document.getElementById('finish-title').innerHTML='Totality<br>at the finish';
-        document.getElementById('finish-stats').innerHTML='gates <b>'+S.gates+'/'+GATES.length+'</b> &nbsp;·&nbsp; best air <b>'+S.bestAir.toFixed(1)+'s</b> &nbsp;·&nbsp; top speed <b>'+Math.round(topSpeed*3.6)+' km/h</b>';
-        sfxSuccess(); }
-      document.getElementById('finish').style.display='flex';
+        sfxLevelWin();
+        document.getElementById('finish').style.display='flex';
+      }
     }
 
     // HUD
     topSpeed=Math.max(topSpeed,S.speed);
     $spd.textContent=Math.round(S.speed*3.6); $alt.textContent=Math.round(TOP_ALT+S.y);
     $count.textContent = S.mode==='adv'? S.dodged : S.gates;
-    $prog.style.height=(descProg*100).toFixed(0)+'%';
+    $prog.style.height=((S.mode==='sim'?curPhase:descProg)*100).toFixed(0)+'%';   // sim: eclipse clock; adv: descent
     var lbl=PHASE_LABELS[0][1]; for(var i=0;i<PHASE_LABELS.length;i++){ if(curPhase>=PHASE_LABELS[i][0]) lbl=PHASE_LABELS[i][1]; } $phase.textContent=lbl;
     $hdg.textContent=Math.abs(S.head)<0.12?'FALL LINE':(S.head<0?'CARVE LEFT':'CARVE RIGHT');
     $lines.style.opacity=clamp((S.speed-26)/22,0,1)*0.9;

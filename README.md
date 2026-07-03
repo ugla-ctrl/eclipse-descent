@@ -9,22 +9,25 @@ folder on any static host.
 
 ## Two ways down the mountain (menu)
 
-- **Free Ride** — pure descent. Race the shadow to totality at your own pace. Carve, catch
-  air off the kickers, clip the slalom gates.
+- **Free Ride** — endless roam, the Iceland-flight-sim way: the eclipse runs on its own
+  real-time clock (~90 s to totality, hold, release, repeat — `E` fast-forwards). Cross the
+  base and you wrap back to the summit for another lap. Carve, catch air, clip gates.
 - **Adventure** — the same mountain as a challenge run, in three difficulties:
   - **Green · easy** — 5 hearts, sparse snowballs, wide target
   - **Blue · steeper** — 4 hearts, faster & more obstacles, medium target
   - **Black · expert** — 3 hearts, fast dense snowballs, narrow target
 
-  **Dodge** the pines and the rolling **snowballs** (each hit costs a heart; run out and you
+  **Dodge** the rock outcrops and the rolling **snowballs** (each hit costs a heart; run out and you
   wipe out), then hit the big final kicker and **stick the landing on the bullseye target**
   to complete the run. Tuned to be a real challenge without being punishing — hits give you
   a short invulnerability window, and the target is generous on Green.
 
+Terrain look referenced from **Cardrona / Treble Cone (NZ)** — treeless high-country bowls,
+golden tussock and scree bleeding through the snow, rock bands along the apron.
+
 ## The eclipse (both modes)
 
-The whole descent *is* one long total eclipse. A single `phase` (0 → 1) driven by how far
-you've dropped couples lights, fog, the sky shader, the sun/moon/corona, stars, snow tint,
+A single `phase` (0 → 1) — time-driven in Free Ride, descent-driven in Adventure — couples lights, fog, the sky shader, the sun/moon/corona, stars, snow tint,
 and bloom in lockstep: brilliant daylight at the summit → partial → diamond ring →
 **totality at the valley floor**, corona blooming dead ahead as you carve toward it.
 

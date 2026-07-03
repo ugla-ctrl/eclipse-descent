@@ -17,11 +17,11 @@ folder on any static host.
   - **Blue · steeper** — 4 hearts, faster & more obstacles, medium target
   - **Black · expert** — 3 hearts, fast dense snowballs, narrow target
 
-  **Dodge** the rock outcrops and the rolling **snowballs** — plough into a rock and you stop dead and
-  get stuck for a beat before digging out (jump to clear them); each hit also costs a heart, and if you
-  run out you wipe out. Then hit the big final kicker and **stick the landing on the bullseye target**
-  to complete the run. Tuned to be a real challenge without being punishing — hits give you
-  a short invulnerability window, and the target is generous on Green.
+  **Dodge** the rock outcrops and the rolling **snowballs** (jump to clear them) — plough into a rock
+  and you stop dead and get stuck; mash jump to dig yourself out early, or wait it out. Each hit costs
+  a heart, and if you run out you wipe out. Then hit the big final kicker and **stick the landing on
+  the bullseye target** to complete the run. Tuned to be a real challenge without being punishing —
+  hits give you a short invulnerability window, and the target is generous on Green.
 
 Terrain look referenced from **Cardrona / Treble Cone (NZ)** — treeless high-country bowls,
 golden tussock and scree bleeding through the snow, rock bands along the apron.
